@@ -788,7 +788,7 @@
       </div>
 
       <div class="no-api-banner" id="no-api-banner">
-        ⚠️ API Key belum diset. Pergi ke Pengaturan → Konfigurasi API untuk memulai.
+        ⚠️ API Key belum diset. Pergi ke Pengaturan → Konfigurasi API dan masukkan OpenRouter API Key.
       </div>
 
       <div id="chat-area" style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
@@ -822,14 +822,30 @@
         <div id="section-api" style="display:none">
           <div class="settings-card">
             <h3>🔐 Konfigurasi API</h3>
-            <label class="settings-label">ANTHROPIC API KEY</label>
-            <input type="password" class="settings-input" id="api-key-input" placeholder="sk-ant-...">
+            <label class="settings-label">OPEN ROUTER API KEY</label>
+            <input type="password" class="settings-input" id="api-key-input" placeholder="sk-or-v1-...">
             <label class="settings-label">MODEL AI</label>
             <select class="settings-select" id="model-select">
-              <option value="claude-sonnet-4-20250514">Claude Sonnet 4 (Recommended)</option>
-              <option value="claude-opus-4-5">Claude Opus 4.5</option>
-              <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (Fast)</option>
+              <optgroup label="── Anthropic Claude ──">
+                <option value="anthropic/claude-sonnet-4-5">Claude Sonnet 4.5 (Recommended)</option>
+                <option value="anthropic/claude-opus-4-5">Claude Opus 4.5 (Powerful)</option>
+                <option value="anthropic/claude-haiku-4-5">Claude Haiku 4.5 (Fast)</option>
+                <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet</option>
+              </optgroup>
+              <optgroup label="── Google Gemini ──">
+                <option value="google/gemini-2.0-flash-001">Gemini 2.0 Flash</option>
+                <option value="google/gemini-2.5-pro-preview">Gemini 2.5 Pro</option>
+              </optgroup>
+              <optgroup label="── OpenAI ──">
+                <option value="openai/gpt-4o">GPT-4o</option>
+                <option value="openai/gpt-4o-mini">GPT-4o Mini</option>
+              </optgroup>
+              <optgroup label="── Meta Llama ──">
+                <option value="meta-llama/llama-3.3-70b-instruct">Llama 3.3 70B</option>
+              </optgroup>
             </select>
+            <label class="settings-label" style="margin-top:4px;">CUSTOM MODEL ID <span style="color:var(--text-muted)">(opsional, override dropdown)</span></label>
+            <input type="text" class="settings-input" id="model-custom" placeholder="contoh: mistralai/mistral-7b-instruct">
             <button class="btn-save" onclick="saveAPISettings()">Simpan API</button>
             <span class="save-msg" id="save-api-msg">✓ Tersimpan!</span>
           </div>
@@ -1069,7 +1085,8 @@ function bootApp() {
     // Load saved config into fields
     const cfg = getConfig();
     if (cfg.apiKey) document.getElementById('api-key-input').value = cfg.apiKey;
-    if (cfg.model) document.getElementById('model-select').value = cfg.model;
+    if (cfg.modelSelect) document.getElementById('model-select').value = cfg.modelSelect;
+    if (cfg.modelCustom) document.getElementById('model-custom').value = cfg.modelCustom;
     if (cfg.systemPrompt) document.getElementById('sysprompt-input').value = cfg.systemPrompt;
   } else {
     document.getElementById('sb-owner-badge').style.display = 'none';
@@ -1104,10 +1121,13 @@ function showPanel(name) {
 // ═══════════════════════════════════════════
 function saveAPISettings() {
   const apiKey = document.getElementById('api-key-input').value.trim();
-  const model = document.getElementById('model-select').value;
+  const modelSelect = document.getElementById('model-select').value;
+  const modelCustom = document.getElementById('model-custom').value.trim();
   const cfg = getConfig();
   cfg.apiKey = apiKey;
-  cfg.model = model;
+  cfg.model = modelCustom || modelSelect;
+  cfg.modelCustom = modelCustom;
+  cfg.modelSelect = modelSelect;
   saveConfig(cfg);
   if (apiKey) document.getElementById('no-api-banner').classList.remove('show');
   else document.getElementById('no-api-banner').classList.add('show');
@@ -1305,20 +1325,25 @@ async function sendMessage() {
   appendTyping();
 
   try {
-    const body = {
-      model: cfg.model || 'claude-sonnet-4-20250514',
-      max_tokens: 1500,
-      messages: chatHistory
-    };
-    if (cfg.systemPrompt) body.system = cfg.systemPrompt;
+    const model = cfg.model || 'anthropic/claude-sonnet-4-5';
+    const messages = chatHistory.map(m => ({ role: m.role, content: m.content }));
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const body = {
+      model: model,
+      max_tokens: 1500,
+      messages: messages
+    };
+    if (cfg.systemPrompt) {
+      body.messages = [{ role: 'system', content: cfg.systemPrompt }, ...messages];
+    }
+
+    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': cfg.apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
+        'Authorization': `Bearer ${cfg.apiKey}`,
+        'HTTP-Referer': window.location.href,
+        'X-Title': 'Nyx-AI'
       },
       body: JSON.stringify(body)
     });
@@ -1330,7 +1355,7 @@ async function sendMessage() {
       const errMsg = data?.error?.message || 'Error dari API.';
       appendMsg('ai', '⚠️ Error: ' + errMsg);
     } else {
-      const reply = data.content?.[0]?.text || '(Tidak ada respons)';
+      const reply = data.choices?.[0]?.message?.content || '(Tidak ada respons)';
       appendMsg('ai', reply);
       chatHistory.push({ role: 'assistant', content: reply });
     }
